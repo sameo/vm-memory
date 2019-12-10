@@ -318,6 +318,19 @@ pub trait GuestMemory {
             .and_then(|addr| self.check_address(addr))
     }
 
+    /// Returns the address plus the offset if both the base and the result
+    /// belong to the same range.
+    fn checked_range_offset(&self, base: GuestAddress, offset: usize) -> Option<GuestAddress> {
+        base.checked_add(offset as u64).and_then(|addr| {
+            self.find_region(base).and_then(|region| {
+                if addr < region.end_addr() {
+                    return Some(addr);
+                }
+                None
+            })
+        })
+    }
+
     /// Invoke callback `f` to handle data in the address range [addr, addr + count).
     ///
     /// The address range [addr, addr + count) may span more than one GuestMemoryRegion objects, or
@@ -532,5 +545,36 @@ mod tests {
             mem.read_from(offset, &mut Cursor::new(&image), count)
                 .unwrap()
         );
+    }
+
+    #[cfg(feature = "backend-mmap")]
+    #[test]
+    fn checked_range_offset() {
+        let start_addr1 = GuestAddress(0x0);
+        let start_addr2 = GuestAddress(0x4000);
+        let mem = GuestMemoryMmap::new(&[(start_addr1, 0x100), (start_addr2, 0x100)]).unwrap();
+
+        // Positive check: We should be within the first range
+        assert_eq!(
+            mem.checked_range_offset(start_addr1, 0x10),
+            Some(GuestAddress(0x10))
+        );
+
+        // Positive check: We should be within the second range
+        assert_eq!(
+            mem.checked_range_offset(start_addr2, 0x10),
+            Some(GuestAddress(0x4010))
+        );
+
+        // Negative check: We should fall out of the first range
+        assert_eq!(mem.checked_range_offset(start_addr1, 0x200), None);
+
+        // Negative check: We should fall out of the second range
+        assert_eq!(mem.checked_range_offset(start_addr2, 0x4200), None);
+
+        // Negative check: We should fall out of the first range, and fall within the
+        // second range. That must fail as the resulting address is not in the same
+        // range as the start.
+        assert_eq!(mem.checked_range_offset(start_addr1, 0x4010), None);
     }
 }
