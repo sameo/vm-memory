@@ -141,6 +141,23 @@ impl GuestRegionMmap {
         self.check_address(addr)
             .map(|addr| self.as_ptr().wrapping_offset(addr.raw_value() as isize))
     }
+
+    /// Convert an absolute address into an address space (GuestMemory)
+    /// to a host pointer and verify that the provided size define a valid
+    /// range within the memory region.
+    /// Return None if it is out of bounds or if addr+size overlaps the region.
+    pub fn get_host_range_address(
+        &self,
+        addr: MemoryRegionAddress,
+        size: usize,
+    ) -> Option<*mut u8> {
+        // Not sure why wrapping_offset is not unsafe.  Anyway this
+        // is safe because we've just range-checked addr using check_address.
+        self.check_address(addr).and_then(|addr| {
+            self.checked_offset(addr, size)
+                .map(|_| self.as_ptr().wrapping_offset(addr.raw_value() as isize))
+        })
+    }
 }
 
 impl Deref for GuestRegionMmap {
@@ -437,6 +454,15 @@ impl GuestMemoryMmap {
     pub fn get_host_address(&self, addr: GuestAddress) -> Option<*mut u8> {
         self.to_region_addr(addr)
             .and_then(|(r, addr)| r.get_host_address(addr))
+    }
+
+    /// Convert an absolute address into an address space (GuestMemory)
+    /// to a host pointer and verify that the provided size define a valid
+    /// range within a single memory region.
+    /// Return None if it is out of bounds or if addr+size overlaps a single region.
+    pub fn get_host_range_address(&self, addr: GuestAddress, size: usize) -> Option<*mut u8> {
+        self.to_region_addr(addr)
+            .and_then(|(r, addr)| r.get_host_range_address(addr, size))
     }
 }
 
@@ -827,6 +853,60 @@ mod tests {
                 guest_mem.find_region(GuestAddress(0x800)).unwrap().as_ptr()
             );
             assert_eq!(unsafe { ptr0.offset(0x200) }, ptr1);
+        }
+    }
+
+    #[test]
+    fn test_get_host_range_address() {
+        let f1 = tempfile().unwrap();
+        f1.set_len(0x400).unwrap();
+        let f2 = tempfile().unwrap();
+        f2.set_len(0x400).unwrap();
+
+        let start_addr1 = GuestAddress(0x0);
+        let start_addr2 = GuestAddress(0x1000);
+        let guest_mem =
+            GuestMemoryMmap::new(&[(start_addr1, 0x400), (start_addr2, 0x400)]).unwrap();
+
+        let guest_mem_backed_by_file = GuestMemoryMmap::with_files(&[
+            (start_addr1, 0x400, Some(FileOffset::new(f1, 0))),
+            (start_addr2, 0x400, Some(FileOffset::new(f2, 0))),
+        ])
+        .unwrap();
+
+        let guest_mem_list = vec![guest_mem, guest_mem_backed_by_file];
+        for guest_mem in guest_mem_list.iter() {
+            assert!(guest_mem
+                .get_host_range_address(GuestAddress(0x600), 0x100)
+                .is_none());
+
+            // Overlapping range
+            assert!(guest_mem
+                .get_host_range_address(GuestAddress(0x1000), 0x500)
+                .is_none());
+
+            // Overlapping range
+            assert!(guest_mem
+                .get_host_range_address(GuestAddress(0x1200), 0x500)
+                .is_none());
+
+            let ptr = guest_mem
+                .get_host_range_address(GuestAddress(0x1000), 0x100)
+                .unwrap();
+
+            let ptr0 = guest_mem
+                .get_host_range_address(GuestAddress(0x1100), 0x100)
+                .unwrap();
+
+            let ptr1 = guest_mem.get_host_address(GuestAddress(0x1200)).unwrap();
+            assert_eq!(
+                ptr,
+                guest_mem
+                    .find_region(GuestAddress(0x1100))
+                    .unwrap()
+                    .as_ptr()
+            );
+            assert_eq!(unsafe { ptr0.offset(0x100) }, ptr1);
         }
     }
 
