@@ -12,7 +12,7 @@ jobs:
     - name: Trigger Buildkite Pipeline
       uses: buildkite/trigger-pipeline-action@v1.2.0
       env:
-        PIPELINE: "cloud-hypervisor/vm-memory/rust-vmm-ci/.buildkite/pipeline.linux.yml"
+        PIPELINE: "cloud-hypervisor/vm-memory-ci"
         COMMIT: "HEAD"
         BRANCH: "master"
         MESSAGE: "GitHub cloud-hypervisor/rust-vmm action"
