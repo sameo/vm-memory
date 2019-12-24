@@ -1,4 +1,4 @@
-name: buildkite-CI
+name: vm-memory
 
 on: [push, pull_request]
 
@@ -7,10 +7,13 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker://rustvmm/dev:v4
+      options: --security-opt seccomp=unconfined
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v1
+      uses: actions/checkout@v1.2.0
+      with:
+        submodules: true
     - name: Install Toolchains
       run: |
         curl https://sh.rustup.rs -sSf | sh -s -- --profile minimal --default-toolchain 1.39.0 -y
@@ -36,3 +39,4 @@ jobs:
       run: cargo check --all-targets
     - name: Coverage [x86]
       run: pytest rust-vmm-ci/integration_tests/test_coverage.py
+      continue-on-error: true
